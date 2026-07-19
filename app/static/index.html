@@ -80,11 +80,12 @@
 
         /* --- CUSTOM TIME SLIDER STYLES --- */
         input[type=range] {
-            -webkit-appearance: none; /* Strip native browser styling */
+            -webkit-appearance: none; /* Strip native styling for Chrome/Safari */
+            appearance: none;         /* Strip native styling for standard modern browsers */
             width: 100%;
             background: transparent;
-            padding: 0; /* Override the global text-input padding */
-            border: none; /* Override the global text-input border */
+            padding: 0; 
+            border: none; 
             margin: 12px 0 8px 0;
         }
 
