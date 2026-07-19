@@ -1,0 +1,24 @@
+FUSED MODEL FEATURE SCHEMA
+==============================
+1. distance_km
+2. average_speed_kmph
+3. hour_sin
+4. hour_cos
+5. day_sin
+6. day_cos
+7. historical_surge_multiplier
+8. historical_wait_time
+9. vanet_avg_queue_length
+10. vanet_comm_delay_ms
+11. start_stop_density
+12. end_stop_density
+13. route_total_stops
+14. environmental_friction_penalty
+15. weather_condition_Fog
+16. weather_condition_Heatwave
+17. weather_condition_Rain
+18. traffic_density_level_Low
+19. traffic_density_level_Medium
+20. traffic_density_level_Very High
+21. road_type_Inner Road
+22. road_type_Main Road

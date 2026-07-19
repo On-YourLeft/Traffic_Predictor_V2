@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Delhi Transit Intelligence Engine</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* Base Dark Theme (Default) */
+        :root {
+            --bg-color: #121212;
+            --sidebar-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --input-bg: #2c2c2c;
+            --border-color: #333;
+            --telemetry-bg: #252525;
+            --highlight-color: #fff;
+        }
+
+        /* Light Theme Overrides */
+        body.light-theme {
+            --bg-color: #eae5d7;
+            --sidebar-bg: #eae5d7;
+            --text-color: #333333;
+            --input-bg: #f9f9f9;
+            --border-color: #cccccc;
+            --telemetry-bg: #f0f2f5;
+            --highlight-color: #000;
+        }
+
+        /* --- Custom Map Marker Styles --- */
+        .custom-poi-badge {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            font-size: 18px;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.6);
+            border: 2px solid white;
+        }
+        .badge-fuel { background-color: #f39c12; }
+        .badge-cafe { background-color: #8e44ad; }
+
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; background-color: var(--bg-color); color: var(--text-color); transition: all 0.3s ease;}
+        
+        #sidebar { width: 400px; padding: 25px; background-color: var(--sidebar-bg); box-shadow: 2px 0 15px rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; transition: background-color 0.3s ease;}
+        #map { flex-grow: 1; height: 100%; z-index: 1;}
+        
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        h2 { margin: 0; color: #4CAF50; font-size: 22px;}
+        
+        /* Settings Button */
+        .btn-settings { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-color); transition: transform 0.2s;}
+        .btn-settings:hover { transform: rotate(45deg); }
+
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 13px; color: #888; text-transform: uppercase; font-weight: bold;}
+        input { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--input-bg); color: var(--text-color); box-sizing: border-box; font-size: 14px;}
+        
+        .btn-primary { width: 100%; padding: 14px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; margin-top: 10px;}
+        .btn-primary:hover { background-color: #0056b3; }
+        .btn-primary:disabled { background-color: #555; cursor: not-allowed; }
+        
+        .poi-container { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-poi { flex: 1; padding: 10px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px;}
+        .btn-fuel { background-color: #f39c12; }
+        .btn-cafe { background-color: #8e44ad; }
+        
+        #result-card { margin-top: 20px; padding: 15px; border-radius: 6px; text-align: center; font-size: 16px; font-weight: bold; display: none; line-height: 1.4;}
+        .Fetching { background-color: #333; color: #fff; border: 1px solid #555;}
+        .Free-flow { background-color: #1b5e20; color: white; border: 1px solid #2e7d32;}
+        .Moderate { background-color: #e65100; color: white; border: 1px solid #f57f17;}
+        .Heavy { background-color: #bf360c; color: white; border: 1px solid #d84315;}
+        .Gridlock { background-color: #b71c1c; color: white; border: 1px solid #c62828;}
+
+        .eta-text { font-size: 24px; display: block; margin-top: 5px; }
+        .alt-text { font-size: 12px; color: #aaa; display: block; margin-top: 8px; font-weight: normal;}
+
+        #telemetry-box { margin-top: auto; padding: 15px; background-color: var(--telemetry-bg); border-radius: 6px; font-size: 12px; color: #888; border-left: 3px solid #007bff; line-height: 1.6;}
+        .highlight { color: var(--highlight-color); font-weight: bold; }
+
+        /* Modal Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; justify-content: center; align-items: center;}
+        .modal-content { background-color: var(--sidebar-bg); padding: 25px; border-radius: 8px; width: 300px; color: var(--text-color); box-shadow: 0 5px 15px rgba(0,0,0,0.3);}
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 18px; font-weight: bold;}
+        .close-btn { cursor: pointer; color: #ff4c4c; font-weight: bold; font-size: 18px;}
+        select { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 15px; background-color: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Preferences</span>
+                <span class="close-btn" onclick="toggleSettings()">✖</span>
+            </div>
+            
+            <label>UI Theme</label>
+            <select id="theme-select" onchange="applySettings()">
+                <option value="dark">Dark Mode</option>
+                <option value="light">Light Mode</option>
+            </select>
+
+            <label>Map View</label>
+            <select id="map-select" onchange="applySettings()">
+                <option value="dark_all">Dark Base (Default)</option>
+                <option value="light_all">Light Base</option>
+                <option value="satellite">Satellite Imagery</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="header-container">
+            <h2>Intelligent Routing</h2>
+            <button class="btn-settings" title="Settings" onclick="toggleSettings()">⚙️</button>
+        </div>
+        
+        <div class="form-group">
+            <label style="display: flex; justify-content: space-between;">
+                Start Location
+                <span onclick="useMyLocation()" style="cursor:pointer; color:#007bff;" title="Use Live GPS">📍 Use GPS</span>
+            </label>
+            <input type="text" id="startLoc" value="Connaught Place, Delhi">
+        </div>
+        <div class="form-group">
+            <label>Destination</label>
+            <input type="text" id="endLoc" value="Vasant Kunj, Delhi">
+        </div>
+
+        <div class="form-group" style="margin-top: 15px;">
+            <label>Departure Time: <span id="timeLabel" style="color: #007bff;">Leave Now</span></label>
+            <input type="range" id="timeSlider" min="0" max="120" step="15" value="0" style="width: 100%; cursor: pointer;" oninput="updateTimeLabel()">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 2px;">
+                <span>Now</span><span>+60m</span><span>+120m</span>
+            </div>
+        </div>
+        
+        <button id="predict-btn" class="btn-primary" onclick="runPipeline()">Analyze Routes & Forecast</button>
+
+        <div class="poi-container">
+            <button class="btn-poi btn-fuel" onclick="findPOIs('fuel')">⛽ Find Petrol</button>
+            <button class="btn-poi btn-cafe" onclick="findPOIs('cafe')">☕ Find Cafes</button>
+        </div>
+
+        <div id="result-card"></div>
+
+        <div id="telemetry-box">
+            System Idle...<br>
+            <i>Awaiting Geocoding & Telemetry</i>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+    
+    <script>
+
+        // --- NEW: TIME FORMATTING HELPER ---
+        function formatETA(totalMins) {
+            let m = Math.round(totalMins);
+            if (m < 60) return `${m} mins`;
+            let h = Math.floor(m / 60);
+            let rem = m % 60;
+            return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+        }
+
+        // Map Initialization
+        var map = L.map('map').setView([28.6139, 77.2090], 11);
+        
+        // Tile Layer Management
+        const tileProviders = {
+            dark_all: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+            light_all: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+            satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        };
+        let currentBaseLayer = L.tileLayer(tileProviders.dark_all, { attribution: '&copy; OpenStreetMap' }).addTo(map);
+        
+        let mapLayers = []; 
+        let poiLayers = []; 
+        let globalActiveRouteGeoJSON = null; 
+
+        let globalEvaluatedRoutes = []; 
+        let activeWaypoints = [];
+
+        // Generate an anonymous session ID for tracking
+        const sessionId = "anon_" + Math.random().toString(36).substring(2, 9);
+
+
+        // --- UI & SETTINGS LOGIC ---
+        function toggleSettings() {
+            const modal = document.getElementById('settings-modal');
+            modal.style.display = (modal.style.display === 'flex') ? 'none' : 'flex';
+        }
+
+        function applySettings() {
+            const theme = document.getElementById('theme-select').value;
+            if (theme === 'light') document.body.classList.add('light-theme');
+            else document.body.classList.remove('light-theme');
+
+            const mapStyle = document.getElementById('map-select').value;
+            map.removeLayer(currentBaseLayer);
+            currentBaseLayer = L.tileLayer(tileProviders[mapStyle], { attribution: '&copy; OpenStreetMap' }).addTo(map);
+        }
+
+        // --- LIVE GPS LOGIC ---
+        function useMyLocation() {
+            const startInput = document.getElementById('startLoc');
+            startInput.value = "Locating GPS...";
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(async (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    // Reverse geocode to get a readable street name
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+                        const data = await res.json();
+                        startInput.value = data.display_name || `${lat}, ${lon}`;
+                    } catch (e) {
+                        startInput.value = `${lat}, ${lon}`; // Fallback to raw coords
+                    }
+                }, () => {
+                    alert("GPS Access Denied or Unavailable.");
+                    startInput.value = "Connaught Place, Delhi";
+                });
+            }
+        }
+
+        // --- TIME SLIDER LOGIC ---
+        function updateTimeLabel() {
+            const val = document.getElementById('timeSlider').value;
+            document.getElementById('timeLabel').innerHTML = val == 0 ? "Leave Now" : `Leave in ${val} mins`;
+        }
+
+        // --- MULTI-PITSTOP LOGIC ---
+        function addStop(lat, lon, name) {
+            activeWaypoints.push({ lat: lat, lon: lon, name: name }); // Add to the array
+            map.closePopup(); 
+            document.getElementById('predict-btn').click(); // Auto-rerun pipeline
+        }
+
+        function removeStop(index) {
+            activeWaypoints.splice(index, 1); // Remove the specific stop at this index
+            document.getElementById('predict-btn').click(); // Auto-rerun pipeline
+        }
+
+
+        // --- GEOLOCATION LOGIC ---
+        async function geocode(address) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+            const response = await fetch(url);
+            const data = await response.json();
+            if (data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            throw new Error(`Could not find: ${address}`);
+        }
+
+        // --- ADVANCED POI RADAR (TURF.JS) ---
+        async function findPOIs(amenityType) {
+            const teleBox = document.getElementById('telemetry-box');
+            let overpassBbox;
+            let routeExists = !!globalActiveRouteGeoJSON;
+
+            if (routeExists) {
+                teleBox.innerHTML += `<br><i>Scanning along route for ${amenityType}...</i>`;
+                let bbox = turf.bbox(globalActiveRouteGeoJSON);
+                overpassBbox = `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`; 
+            } else {
+                teleBox.innerHTML += `<br><i>Scanning screen area for ${amenityType}...</i>`;
+                const bounds = map.getBounds();
+                overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+            }
+            
+            // --- THE SPATIAL BOTTLENECK FIX ---
+            // [timeout:10] forces the server to abort if it takes too long.
+            // out 200; hard-caps the results to prevent Turf.js from freezing your CPU with 8,000+ math calculations.
+            const query = `[out:json][timeout:10];node[amenity=${amenityType}](${overpassBbox});out 200;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                poiLayers.forEach(marker => map.removeLayer(marker));
+                poiLayers = [];
+
+                let validPOIs = [];
+
+                data.elements.forEach(poi => {
+                    if(poi.lat && poi.lon) {
+                        let deviation = 0;
+                        if (routeExists) {
+                            let pt = turf.point([poi.lon, poi.lat]);
+                            deviation = turf.pointToLineDistance(pt, globalActiveRouteGeoJSON, {units: 'kilometers'});
+                        }
+                        if (!routeExists || deviation <= 2.5) {
+                            validPOIs.push({ ...poi, deviation: deviation });
+                        }
+                    }
+                });
+
+                if (routeExists) {
+                    validPOIs.sort((a, b) => a.deviation - b.deviation);
+                    validPOIs = validPOIs.slice(0, 10); 
+                }
+
+                validPOIs.forEach(poi => {
+                    let shopName = poi.tags.name ? poi.tags.name : `Unknown ${amenityType}`;
+                    let brand = poi.tags.brand ? `<br><small>${poi.tags.brand}</small>` : '';
+                    let devText = '';
+                    
+                    if (routeExists) {
+                        let color = poi.deviation < 0.5 ? '#4CAF50' : '#ff9800';
+                        devText = `<br><b style="color:${color};">+${poi.deviation.toFixed(2)} km off route</b>`;
+                    }
+
+                    let emoji = amenityType === 'fuel' ? '⛽' : '☕';
+                    let badgeClass = amenityType === 'fuel' ? 'badge-fuel' : 'badge-cafe';
+
+                    let customIcon = L.divIcon({
+                        html: `<div class="custom-poi-badge ${badgeClass}" style="width:100%; height:100%;">${emoji}</div>`,
+                        className: '', 
+                        iconSize: [32, 32], 
+                        iconAnchor: [16, 16], 
+                        popupAnchor: [0, -16] 
+                    });
+
+                    // Create dynamic popup with Add Stop button
+                    let safeName = shopName.replace(/'/g, "\\'"); // Escape for HTML
+                    let popupHtml = `
+                        <div style="font-size:14px; min-width:140px;">
+                            <b>${shopName}</b>${brand}${devText}<br>
+                            <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
+                                style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
+                                ➕ ADD STOP
+                            </button>
+                        </div>
+                    `;
+
+                    let marker = L.marker([poi.lat, poi.lon], { icon: customIcon })
+                                  .addTo(map)
+                                  .bindPopup(popupHtml); // <-- Use the new popupHtml                    
+
+                });
+
+                teleBox.innerHTML += `<br><span class="highlight" style="color:#4CAF50;">Found ${validPOIs.length} optimal stops.</span>`;
+            } catch (error) {
+                console.error("POI Error:", error);
+            }
+        }
+
+        // --- MAIN PIPELINE (AI & ROUTING) ---
+        async function runPipeline() {
+            const btn = document.getElementById('predict-btn');
+            const resultCard = document.getElementById('result-card');
+            const teleBox = document.getElementById('telemetry-box');
+            globalActiveRouteGeoJSON = null; 
+            
+            btn.disabled = true;
+            resultCard.style.display = 'block';
+            resultCard.className = "Fetching";
+            resultCard.innerHTML = "Step 1: Geocoding...";
+
+            try {
+                mapLayers.forEach(layer => map.removeLayer(layer));
+                mapLayers = [];
+                poiLayers.forEach(marker => map.removeLayer(marker));
+                poiLayers = [];
+
+                const startCoords = await geocode(document.getElementById('startLoc').value);
+                const endCoords = await geocode(document.getElementById('endLoc').value);
+
+                resultCard.innerHTML = "Step 2: Calculating Alternatives...";
+                
+                // Build dynamic coordinates string (Start -> [Stop 1] -> [Stop 2] -> End)
+                let coordsString = `${startCoords.lon},${startCoords.lat}`;
+                
+                // --- NEW: LOOP THROUGH ALL STOPS ---
+                activeWaypoints.forEach(wp => {
+                    coordsString += `;${wp.lon},${wp.lat}`;
+                });
+                
+                coordsString += `;${endCoords.lon},${endCoords.lat}`;
+
+                const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson&alternatives=true`);
+                const osrmData = await osrmRes.json();
+
+                resultCard.innerHTML = "Step 3: Fetching Weather...";
+                const weatherRes = await fetch('https://api.open-meteo.com/v1/forecast?latitude=28.6139&longitude=77.2090&current=temperature_2m,rain');
+                const weatherData = await weatherRes.json();
+                const temp = weatherData.current.temperature_2m;
+                const rain = weatherData.current.rain;
+
+                resultCard.innerHTML = "Step 4: AI Evaluating Alternate Routes...";
+                let evaluatedRoutes = [];
+                let systemHour = 0;
+
+                // --- CALENDAR-AWARE LOGIC ---
+                const now = new Date();
+                const isWeekend = (now.getDay() === 0 || now.getDay() === 6);
+                const currentHour = now.getHours();
+                const numRoutes = Math.min(osrmData.routes.length, 2);
+
+                for (let r = 0; r < numRoutes; r++) {
+                    let routeData = osrmData.routes[r];
+                    let routeDistance = routeData.distance / 1000;
+                    let routeDurationHours = routeData.duration / 3600;
+                    
+                    let liveSpeed = Math.min(80, routeDistance / routeDurationHours); 
+                    let baseDensity = Math.max(15, 110 - (liveSpeed * 1.2)); 
+
+                    // Apply Telemetry Discount based on actual time
+                    if (isWeekend) {
+                        baseDensity = baseDensity * 0.4; // 60% fewer cars on Sundays
+                    } else if (currentHour < 7 || currentHour > 21) {
+                        baseDensity = baseDensity * 0.3; // Night time empty roads
+                    } else if (currentHour >= 9 && currentHour <= 11 || currentHour >= 17 && currentHour <= 20) {
+                        baseDensity = baseDensity * 1.2; // Rush hour penalty
+                    }
+                    
+                    let liveDensity = baseDensity;
+                    let coords = routeData.geometry.coordinates;
+                    const CHUNK_SIZE = 20; 
+                    let mapSegments = [];
+                    let apiSegments = [];
+
+                    for(let i = 0; i < coords.length; i += CHUNK_SIZE) {
+                        let chunk = coords.slice(i, i + CHUNK_SIZE + 1); 
+                        if(chunk.length < 2) continue; 
+                        mapSegments.push(chunk);
+                        
+                        // 30% chance of a local bottleneck/red light
+                        // Disable the presentation bottleneck hack so the AI gets real speeds
+                        let isBottleneck = false; 
+
+                        // Pass the true liveSpeed without throttling it
+                        let forcedSpeed = liveSpeed;
+                        let forcedDensity = isBottleneck ? (150 + Math.random() * 50) : (5 + Math.random() * 15);
+
+                        apiSegments.push({
+                            avg_speed_kmph: forcedSpeed,
+                            density_veh_per_km: forcedDensity,
+                            temp_c: temp,
+                            rain_intensity_mmph: rain,
+                            distance_km: routeDistance * (chunk.length / coords.length)
+                        });
+                    }
+
+                
+                    // Call FastAPI Backend with Time Slider value
+                    let offsetValue = parseInt(document.getElementById('timeSlider').value);
+                    const backendRes = await fetch('/predict_route_segments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            segments: apiSegments,
+                            future_offset_mins: offsetValue
+                        })
+                    });
+                    
+                    // --- THE MISSING LINES ---
+                    // We must unpack the JSON response so the variable 'predictions' exists!
+                    const finalResult = await backendRes.json();
+                    systemHour = finalResult.system_time.hour;
+                    const predictions = finalResult.segment_predictions;
+                    
+                    // NEW: Extract Live Environmental Data for UI display
+                    let envData = finalResult.environmental_telemetry || {};
+                    window.liveAqiSeverity = envData.live_aqi_severity || 3.0;
+
+                    // 5. Calculate AI-Adjusted ETA (Dynamic Ground Truth Calibrator)
+                    let finalEtaMins = 0;
+                    let gridlocks = 0;
+                    
+                    predictions.forEach((predicted_segment_mins, idx) => {
+                        // Trust the Backend AI! Do not multiply it again on the frontend.
+                        let adjusted_mins = predicted_segment_mins; 
+                        
+                        // --- THE CALCULATED ROUTE TWEAK ---
+                        // Add a 45-second (0.75 mins) penalty per segment for stoplights & intersections
+                        adjusted_mins += 0.75; 
+                        
+                        finalEtaMins += adjusted_mins;
+                        
+                        // Calculate gridlocks if this segment takes 2x longer than pure math
+                        let segmentBaseTime = (apiSegments[idx].distance_km / liveSpeed) * 60;
+                        if (adjusted_mins > segmentBaseTime * 2.0) {
+                            gridlocks++;
+                        }
+                    });
+
+                    let overallStatus = "Free-flow";
+                    if (finalEtaMins > (routeData.duration/60) * 1.5) overallStatus = "Moderate";
+                    if (finalEtaMins > (routeData.duration/60) * 2.0) overallStatus = "Heavy";
+                    if (gridlocks > predictions.length * 0.2) overallStatus = "Gridlock"; 
+
+                    evaluatedRoutes.push({
+                        eta: finalEtaMins,
+                        status: overallStatus,
+                        distance: routeDistance,
+                        mapSegments: mapSegments,
+                        predictions: predictions,
+                        telemetry: apiSegments
+
+                    });
+                }
+
+                // Sort routes by quickest AI ETA
+                evaluatedRoutes.sort((a, b) => a.eta - b.eta);
+                globalEvaluatedRoutes = evaluatedRoutes; // Save to global state
+                
+                // Draw the primary route (Index 0) by default
+                renderSelectedRoute(0, systemHour);
+
+                // --- NEW: SILENT TELEMETRY LOGGING ---
+                // We log the fastest route (Index 0) to the database for analytics
+                let bestRoute = globalEvaluatedRoutes[0];
+                fetch('/log_telemetry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        start_zone: document.getElementById('startLoc').value,
+                        end_zone: document.getElementById('endLoc').value,
+                        distance_km: bestRoute.distance,
+                        ai_predicted_mins: bestRoute.eta
+                    })
+                }).catch(err => console.log("Telemetry skipped:", err));
+
+            } catch (err) {
+                console.error(err);
+                resultCard.innerHTML = "Error running pipeline. Check console.";
+                resultCard.className = "Gridlock";
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // --- ROUTE RENDERING & SELECTION ENGINE ---
+        function renderSelectedRoute(selectedIndex, systemHour = null) {
+            const resultCard = document.getElementById('result-card');
+            const teleBox = document.getElementById('telemetry-box');
+            
+            // Clear existing map layers
+            mapLayers.forEach(layer => map.removeLayer(layer));
+            mapLayers = [];
+
+            let activeRoute = globalEvaluatedRoutes[selectedIndex];
+            
+            // --- UPDATE POI MATH GEOJSON ---
+            let flatCoords = [];
+            activeRoute.mapSegments.forEach(chunk => {
+                chunk.forEach(coord => flatCoords.push(coord));
+            });
+            globalActiveRouteGeoJSON = turf.lineString(flatCoords);
+
+            // --- BUILD THE ROUTE TOGGLE UI ---
+            // --- BUILD THE ROUTE TOGGLE UI ---
+            let buttonsHtml = `<div style="display:flex; gap:10px; margin-top:10px; justify-content:center;">`;
+            globalEvaluatedRoutes.forEach((route, idx) => {
+                let isSelected = idx === selectedIndex;
+                let btnColor = isSelected ? '#007bff' : '#555';
+                let btnText = idx === 0 ? 'Fastest' : `Alt ${idx}`;
+                // Using formatETA() instead of Math.round()
+                buttonsHtml += `<button onclick="renderSelectedRoute(${idx})" style="background-color:${btnColor}; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:12px;">${btnText} (${formatETA(route.eta)})</button>`;
+            });
+            buttonsHtml += `</div>`;
+
+            // --- NEW: MULTI-PITSTOP UI ---
+            let waypointHtml = '';
+            if (activeWaypoints.length > 0) {
+                waypointHtml = `
+                    <div style="margin-top:15px; padding:10px; background-color: var(--telemetry-bg); border-radius:6px; font-size:13px; color: var(--text-color); border-left: 4px solid #f39c12; text-align:left;">
+                        <b>📍 Pitstops Active (${activeWaypoints.length}):</b>
+                        <ul style="padding-left: 20px; margin-top: 8px; margin-bottom: 5px;">
+                `;
+                
+                // Build a list item for every stop
+                activeWaypoints.forEach((wp, idx) => {
+                    waypointHtml += `
+                        <li style="margin-bottom: 8px;">
+                            ${wp.name} 
+                            <button onclick="removeStop(${idx})" style="background-color:#e74c3c; color:white; border:none; padding:2px 8px; border-radius:3px; cursor:pointer; font-size: 11px; float: right; font-weight:bold;">
+                                ✖ Drop
+                            </button>
+                        </li>
+                    `;
+                });
+                
+                waypointHtml += `</ul></div>`;
+            }
+
+            // Update UI Result Card (Include the waypointHtml!)
+            resultCard.className = activeRoute.status;
+            resultCard.innerHTML = `Forecast: ${activeRoute.status} <span class="eta-text">ETA: ${formatETA(activeRoute.eta)}</span>${buttonsHtml}${waypointHtml}`;
+
+            // Update Telemetry Box
+            const telemetryDate = new Date();
+            const telemetryDateLabel = telemetryDate.toLocaleDateString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric'
+            });
+            const telemetryDayLabel = telemetryDate.toLocaleDateString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                weekday: 'long'
+            });
+
+            let timeText = systemHour !== null ? `<br>Auto-Time: <span class="highlight">Hour ${systemHour}:00 IST • ${telemetryDateLabel} • ${telemetryDayLabel}</span>` : '';
+            
+            // Format the AQI text nicely
+            let aqiSeverity = window.liveAqiSeverity || 3.0;
+            let envString = `Moderate (Level: ${aqiSeverity})`;
+            if (aqiSeverity >= 4.0) envString = `<span style="color:#f44336;">Severe / Rain (Level: ${aqiSeverity})</span>`;
+            if (aqiSeverity <= 2.0) envString = `<span style="color:#4CAF50;">Clear / Good (Level: ${aqiSeverity})</span>`;
+
+            teleBox.innerHTML = `
+                <span style="color:#007bff">● Deep Route Telemetry Synced</span><br>
+                Active Route Dist: <span class="highlight">${activeRoute.distance.toFixed(1)} km</span>
+                ${timeText}
+                <br>Env Penalty: <span class="highlight">${envString}</span>
+                <hr style="border: 0.5px solid #444; margin: 8px 0;">
+                <span style="color:#e67e22; font-size:11px;">
+                    🧠 <b>Domain Intel Active:</b> Fusing Metro Hubs, VANET sensors, Uber velocities, and cyclic time.
+                </span>
+            `;
+
+            // --- DRAW INACTIVE ROUTES (GREY DASHED) ---
+            globalEvaluatedRoutes.forEach((route, idx) => {
+                if (idx !== selectedIndex) {
+                    route.mapSegments.forEach(segment => {
+                        let latLngs = segment.map(c => [c[1], c[0]]);
+                        let line = L.polyline(latLngs, { color: '#555555', weight: 5, opacity: 0.6, dashArray: '5, 10' });
+                        
+                        // Add click listener to grey lines to select them!
+                        line.on('click', () => renderSelectedRoute(idx));
+                        
+                        mapLayers.push(line);
+                        line.addTo(map);
+                    });
+                }
+            });
+
+            // --- DRAW ACTIVE ROUTE (MULTI-COLORED) ---
+            // --- DRAW ACTIVE ROUTE (MULTI-COLORED) ---
+            activeRoute.telemetry.forEach((segmentData, idx) => {
+                // Get AI predicted time and segment distance
+                let time_mins = activeRoute.predictions[idx];
+                let dist_km = segmentData.distance_km;
+                
+                // Back-calculate the actual speed the AI predicts
+                let aiSpeed = (dist_km / Math.max(time_mins, 0.1)) * 60;
+                
+                let rColor = '#4CAF50'; // Free-flow
+                if (aiSpeed < 40) rColor = '#ff9800'; // Moderate
+                if (aiSpeed < 20) rColor = '#f44336'; // Heavy
+                if (aiSpeed < 10) rColor = '#b71c1c'; // Gridlock
+
+                let latLngs = activeRoute.mapSegments[idx].map(c => [c[1], c[0]]);
+                let segmentLine = L.polyline(latLngs, { color: rColor, weight: 7, opacity: 1.0 });
+                
+                // Add hover stats for presentation flair
+                segmentLine.bindPopup(`<b>AI Predicted Speed:</b> ${Math.round(aiSpeed)} km/h<br><b>Time:</b> ${time_mins.toFixed(1)} mins<br><b>Distance:</b> ${dist_km.toFixed(1)} km`);
+                
+                mapLayers.push(segmentLine);
+                segmentLine.addTo(map);
+            });
+
+            // Bring active route to the front so it overlays the grey lines
+            mapLayers.forEach(layer => {
+                if (layer.options.dashArray !== '5, 10') layer.bringToFront();
+            });
+
+            // If it's the first render, zoom to bounds
+            if (systemHour !== null) {
+                let group = L.featureGroup(mapLayers);
+                map.fitBounds(group.getBounds());
+            }
+        }
+    </script>
+</body>
+</html>

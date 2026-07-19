@@ -1,1 +1,8 @@
-venv/
+mlruns/
+mlflow.db
+models/*.joblib
+models/*.pkl
+.venv/
+__pycache__/
+*.pyc
+database/
