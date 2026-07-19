@@ -1,6 +1,5 @@
 mlruns/
 mlflow.db
-models/*.joblib
 models/*.pkl
 .venv/
 __pycache__/
