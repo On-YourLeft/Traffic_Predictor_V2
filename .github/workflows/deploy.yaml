@@ -40,6 +40,6 @@ jobs:
         cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/traffic-predictor:buildcache
         cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/traffic-predictor:buildcache,mode=max
 
-    - name: 🌍 Trigger Render Deployment
-      run: |
-        curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    #- name: 🌍 Trigger Render Deployment
+    #  run: |
+    #    curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
