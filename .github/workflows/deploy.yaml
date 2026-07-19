@@ -39,7 +39,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/traffic-predictor:latest
+        tags: ${{ secrets.DOCKER_USERNAME }}/traffic-predictor-v2:latest
         cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/traffic-predictor-v2:buildcache
         cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/traffic-predictor-v2:buildcache,mode=max
 
