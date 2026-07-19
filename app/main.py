@@ -138,16 +138,11 @@ def build_live_feature_matrix(segment_distance, segment_speed, future_offset_min
     """
     Dynamically constructs the exact feature matrix the Utter Perfection model expects.
     """
-    # 1. Create a blank dictionary of all zeros based on the exact columns the model was trained on
     feature_dict = {col: 0.0 for col in model_columns}
     
-    # 2. Inject core routing telemetry
-    if 'distance_km' in feature_dict:
-        feature_dict['distance_km'] = segment_distance
-    if 'average_speed_kmph' in feature_dict:
-        feature_dict['average_speed_kmph'] = segment_speed
+    if 'distance_km' in feature_dict: feature_dict['distance_km'] = segment_distance
+    if 'average_speed_kmph' in feature_dict: feature_dict['average_speed_kmph'] = segment_speed
         
-    # 3. Inject Real-Time Cyclical Math (With future slider support)
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist) + timedelta(minutes=future_offset_mins)
     hour = now.hour
@@ -158,24 +153,20 @@ def build_live_feature_matrix(segment_distance, segment_speed, future_offset_min
     if 'day_sin' in feature_dict: feature_dict['day_sin'] = np.sin(2 * np.pi * day / 7.0)
     if 'day_cos' in feature_dict: feature_dict['day_cos'] = np.cos(2 * np.pi * day / 7.0)
         
-    # 4. Inject Domain Fusion Defaults (City-wide medians)
+    # Un-scaled constraints (Since the AI is now predicting the whole macro route)
     if 'historical_surge_multiplier' in feature_dict: feature_dict['historical_surge_multiplier'] = 1.15 
     if 'historical_wait_time' in feature_dict: feature_dict['historical_wait_time'] = 4.2 
     
-    # Base queue lengths slightly higher if it's rush hour
     is_rush = 1 if (8 <= hour <= 11) or (17 <= hour <= 20) else 0
     if 'vanet_avg_queue_length' in feature_dict: feature_dict['vanet_avg_queue_length'] = 15.5 if is_rush else 6.2
     if 'vanet_comm_delay_ms' in feature_dict: feature_dict['vanet_comm_delay_ms'] = 65.0 if is_rush else 35.0
     
-    # Default route stops to induce baseline urban friction
     if 'route_total_stops' in feature_dict: feature_dict['route_total_stops'] = 12.0 
     
-    # 5. Inject Live Environmental Constraints
     env_penalty, _ = get_live_delhi_environmental_penalty()
     if 'environmental_friction_penalty' in feature_dict: 
         feature_dict['environmental_friction_penalty'] = env_penalty
         
-    # 6. Convert to a DataFrame perfectly ordered for the Random Forest
     return pd.DataFrame([feature_dict])[model_columns]
 
 # --- CORE PREDICTION ENDPOINT ---
@@ -186,25 +177,43 @@ def predict_route_segments(data: BatchRouteInput):
     
     try:
         _, live_aqi_severity = get_live_delhi_environmental_penalty()
-        predictions = []
         
-        for seg in data.segments:
-            # 1. Build the advanced feature matrix for this specific segment
-            advanced_features = build_live_feature_matrix(
-                segment_distance=seg.distance_km, 
-                segment_speed=seg.avg_speed_kmph,
-                future_offset_mins=data.future_offset_mins
-            )
+        # --- THE MACRO-PREDICTION ARCHITECTURE ---
+        # Calculate totals for the whole trip to bypass the RF Leaf Node Extrapolation Bug
+        total_distance = sum(seg.distance_km for seg in data.segments)
+        
+        # Calculate true weighted average speed
+        if total_distance > 0:
+            avg_speed = sum(seg.avg_speed_kmph * seg.distance_km for seg in data.segments) / total_distance
+        else:
+            avg_speed = 30.0
             
-            # 2. Let the Utter Perfection model predict the time directly
-            predicted_mins = model.predict(advanced_features)[0]
-            
-            # Prevent the AI from predicting negative time
-            safe_mins = max(0.1, float(predicted_mins))
-            predictions.append(safe_mins)
+        # 1. Build the advanced feature matrix for the ENTIRE trip
+        macro_features = build_live_feature_matrix(
+            segment_distance=total_distance, 
+            segment_speed=avg_speed,
+            future_offset_mins=data.future_offset_mins
+        )
+        
+        # 2. Let the Utter Perfection model predict the TOTAL trip time
+        total_predicted_mins = float(model.predict(macro_features)[0])
+        safe_total_mins = max(1.0, total_predicted_mins)
+        
+        # 3. Proportional Micro-Segment Distribution
+        # Distribute the AI's total time proportionally to each chunk based on its physical friction.
+        # Bottleneck segments (slower speed) will automatically absorb a larger share of the total ETA.
+        segment_base_times = [(seg.distance_km / max(seg.avg_speed_kmph, 1.0)) for seg in data.segments]
+        sum_base_times = sum(segment_base_times)
+        
+        predictions = []
+        for base_time in segment_base_times:
+            # What percentage of the physical trip time does this chunk take?
+            share = base_time / max(sum_base_times, 0.0001)
+            # Allocate that percentage of the AI's total predicted time
+            predictions.append(safe_total_mins * share)
 
         return {
-            "segment_predictions": list(predictions),
+            "segment_predictions": predictions,
             "system_time": {"hour": now.hour, "is_weekend": 1 if now.weekday() >= 5 else 0},
             "environmental_telemetry": {"live_aqi_severity": live_aqi_severity}
         }

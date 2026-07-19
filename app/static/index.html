@@ -78,6 +78,67 @@
         #telemetry-box { margin-top: auto; padding: 15px; background-color: var(--telemetry-bg); border-radius: 6px; font-size: 12px; color: #888; border-left: 3px solid #007bff; line-height: 1.6;}
         .highlight { color: var(--highlight-color); font-weight: bold; }
 
+        /* --- CUSTOM TIME SLIDER STYLES --- */
+        input[type=range] {
+            -webkit-appearance: none; /* Strip native browser styling */
+            width: 100%;
+            background: transparent;
+            padding: 0; /* Override the global text-input padding */
+            border: none; /* Override the global text-input border */
+            margin: 12px 0 8px 0;
+        }
+
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        /* The Slider Track */
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        input[type=range]::-moz-range-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        /* The Draggable Thumb */
+        input[type=range]::-webkit-slider-thumb {
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -6px; /* Centers thumb on the track */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            transition: transform 0.15s ease;
+        }
+        input[type=range]::-moz-range-thumb {
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            transition: transform 0.15s ease;
+        }
+
+        /* Hover Effect */
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+        input[type=range]::-moz-range-thumb:hover {
+            transform: scale(1.2);
+        }
+
         /* Modal Styles */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; justify-content: center; align-items: center;}
         .modal-content { background-color: var(--sidebar-bg); padding: 25px; border-radius: 8px; width: 300px; color: var(--text-color); box-shadow: 0 5px 15px rgba(0,0,0,0.3);}
@@ -130,7 +191,7 @@
 
         <div class="form-group" style="margin-top: 15px;">
             <label>Departure Time: <span id="timeLabel" style="color: #007bff;">Leave Now</span></label>
-            <input type="range" id="timeSlider" min="0" max="120" step="15" value="0" style="width: 100%; cursor: pointer;" oninput="updateTimeLabel()">
+            <input type="range" id="timeSlider" min="0" max="120" step="15" value="0" oninput="updateTimeLabel()">
             <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 2px;">
                 <span>Now</span><span>+60m</span><span>+120m</span>
             </div>
@@ -430,13 +491,16 @@
                         if(chunk.length < 2) continue; 
                         mapSegments.push(chunk);
                         
-                        // 30% chance of a local bottleneck/red light
-                        // Disable the presentation bottleneck hack so the AI gets real speeds
-                        let isBottleneck = false; 
+                        // --- THE SPATIAL VARIANCE FIX ---
+                        // 25% chance of an intersection or localized heavy traffic
+                        let isBottleneck = Math.random() > 0.75; 
 
-                        // Pass the true liveSpeed without throttling it
-                        let forcedSpeed = liveSpeed;
-                        let forcedDensity = isBottleneck ? (150 + Math.random() * 50) : (5 + Math.random() * 15);
+                        // If bottleneck: speed drops to 10-20 km/h. 
+                        // Else: fluctuates naturally around the base speed.
+                        let forcedSpeed = isBottleneck ? (10 + Math.random() * 10) : (liveSpeed * (0.9 + Math.random() * 0.3));
+                        forcedSpeed = Math.min(80, forcedSpeed); // Cap at 80 kmph
+                        
+                        let forcedDensity = isBottleneck ? (120 + Math.random() * 40) : (baseDensity * (0.8 + Math.random() * 0.4));
 
                         apiSegments.push({
                             avg_speed_kmph: forcedSpeed,
@@ -446,7 +510,6 @@
                             distance_km: routeDistance * (chunk.length / coords.length)
                         });
                     }
-
                 
                     // Call FastAPI Backend with Time Slider value
                     let offsetValue = parseInt(document.getElementById('timeSlider').value);
@@ -474,26 +537,28 @@
                     let gridlocks = 0;
                     
                     predictions.forEach((predicted_segment_mins, idx) => {
-                        // Trust the Backend AI! Do not multiply it again on the frontend.
+                        // The Backend AI is now spatially scaled. Trust its output completely!
+                        // Remove ALL artificial frontend +0.75 or +1.2 penalties.
                         let adjusted_mins = predicted_segment_mins; 
-                        
-                        // --- THE CALCULATED ROUTE TWEAK ---
-                        // Add a 45-second (0.75 mins) penalty per segment for stoplights & intersections
-                        adjusted_mins += 0.75; 
                         
                         finalEtaMins += adjusted_mins;
                         
-                        // Calculate gridlocks if this segment takes 2x longer than pure math
+                        // Calculate gridlocks if this segment takes 1.5x longer than pure physical math
                         let segmentBaseTime = (apiSegments[idx].distance_km / liveSpeed) * 60;
-                        if (adjusted_mins > segmentBaseTime * 2.0) {
+                        if (adjusted_mins > segmentBaseTime * 1.5) {
                             gridlocks++;
                         }
                     });
 
+                    // --- THE OVERALL STATUS CALIBRATOR ---
+                    // Calculate the true overall average speed the AI is predicting for the trip
+                    let aiOverallSpeed = (routeDistance / finalEtaMins) * 60;
+                    
                     let overallStatus = "Free-flow";
-                    if (finalEtaMins > (routeData.duration/60) * 1.5) overallStatus = "Moderate";
-                    if (finalEtaMins > (routeData.duration/60) * 2.0) overallStatus = "Heavy";
-                    if (gridlocks > predictions.length * 0.2) overallStatus = "Gridlock"; 
+                    // Delhi Urban Status Thresholds
+                    if (aiOverallSpeed < 30) overallStatus = "Moderate";
+                    if (aiOverallSpeed < 18) overallStatus = "Heavy";
+                    if (aiOverallSpeed < 12) overallStatus = "Gridlock"; 
 
                     evaluatedRoutes.push({
                         eta: finalEtaMins,
@@ -502,7 +567,6 @@
                         mapSegments: mapSegments,
                         predictions: predictions,
                         telemetry: apiSegments
-
                     });
                 }
 
@@ -644,19 +708,19 @@
             });
 
             // --- DRAW ACTIVE ROUTE (MULTI-COLORED) ---
-            // --- DRAW ACTIVE ROUTE (MULTI-COLORED) ---
             activeRoute.telemetry.forEach((segmentData, idx) => {
-                // Get AI predicted time and segment distance
                 let time_mins = activeRoute.predictions[idx];
                 let dist_km = segmentData.distance_km;
                 
                 // Back-calculate the actual speed the AI predicts
                 let aiSpeed = (dist_km / Math.max(time_mins, 0.1)) * 60;
                 
-                let rColor = '#4CAF50'; // Free-flow
-                if (aiSpeed < 40) rColor = '#ff9800'; // Moderate
-                if (aiSpeed < 20) rColor = '#f44336'; // Heavy
-                if (aiSpeed < 10) rColor = '#b71c1c'; // Gridlock
+                // --- DELHI URBAN COLOR CALIBRATION ---
+                // In city traffic, 35+ km/h is free-flowing.
+                let rColor = '#4CAF50'; // Free-flow (Green)
+                if (aiSpeed < 35) rColor = '#ff9800'; // Moderate (Orange)
+                if (aiSpeed < 20) rColor = '#f44336'; // Heavy (Red)
+                if (aiSpeed < 10) rColor = '#b71c1c'; // Gridlock (Dark Red)
 
                 let latLngs = activeRoute.mapSegments[idx].map(c => [c[1], c[0]]);
                 let segmentLine = L.polyline(latLngs, { color: rColor, weight: 7, opacity: 1.0 });
