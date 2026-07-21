@@ -81,7 +81,7 @@ To utilize the GitHub Actions pipeline, configure the following secrets in your 
 1. Push code to the `main` branch.
 2. GitHub Actions initializes **Docker Buildx**.
 3. The pipeline fetches cached layers, installs Python dependencies, and forces the inclusion of the `.joblib` ML artifacts.
-4. The new image is pushed to Docker Hub (`YOUR_USERNAME/traffic-predictor:latest`).
+4. The new image is pushed to Docker Hub.
 5. GitHub fires a POST request to Render, seamlessly rolling over the live server to the new container.
 
 ## 📈 Future Roadmap (Phase 4)
