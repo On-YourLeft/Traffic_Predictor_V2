@@ -35,7 +35,7 @@ Unlike standard routing apps that rely purely on static speed limits, this engin
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/traffic_predictor.git
+git clone https://github.com/On-YourLeft/traffic_predictor.git
 cd traffic_predictor
 
 ```
