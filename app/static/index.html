@@ -347,8 +347,8 @@
                 overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
             }
             
-            // 🛠️ FIX 1: Change 'node' to 'nwr' and add 'out center'
-            const query = `[out:json][timeout:10];nwr[amenity=${amenityType}](${overpassBbox});out center 200;`;
+            // 🛠️ FIX 1: Removed the '200' limit so it grabs all POIs in the bounding box.
+            const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
             try {
@@ -387,8 +387,9 @@
                 }
 
                 validPOIs.forEach(poi => {
-                    let shopName = poi.tags.name ? poi.tags.name : `Unknown ${amenityType}`;
-                    let brand = poi.tags.brand ? `<br><small>${poi.tags.brand}</small>` : '';
+                    // 🛠️ FIX 2: Safely check if tags exist before reading the name to prevent silent crashes
+                    let shopName = (poi.tags && poi.tags.name) ? poi.tags.name : `Unknown ${amenityType}`;
+                    let brand = (poi.tags && poi.tags.brand) ? `<br><small>${poi.tags.brand}</small>` : '';
                     let devText = '';
                     
                     if (routeExists) {
