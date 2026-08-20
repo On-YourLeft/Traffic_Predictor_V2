@@ -192,9 +192,9 @@
 
         <div class="form-group" style="margin-top: 15px;">
             <label>Departure Time: <span id="timeLabel" style="color: #007bff;">Leave Now</span></label>
-            <input type="range" id="timeSlider" min="0" max="120" step="15" value="0" oninput="updateTimeLabel()">
-            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 2px;">
-                <span>Now</span><span>+60m</span><span>+120m</span>
+            <input type="datetime-local" id="departureTime" onchange="updateTimeLabel()" style="margin-top: 5px;">
+            <div style="text-align: right; margin-top: 5px;">
+                <span onclick="setNow()" style="cursor:pointer; color:#007bff; font-size: 11px; font-weight: bold;">🔄 Reset to Now</span>
             </div>
         </div>
         
@@ -236,7 +236,7 @@
         const tileProviders = {
             dark_all: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
             light_all: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-            satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            satellite: 'https://server.arcg nline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
         };
         let currentBaseLayer = L.tileLayer(tileProviders.dark_all, { attribution: '&copy; OpenStreetMap' }).addTo(map);
         
@@ -291,9 +291,22 @@
         }
 
         // --- TIME SLIDER LOGIC ---
+        // --- CUSTOM CALENDAR LOGIC ---
+        function setNow() {
+            document.getElementById('departureTime').value = '';
+            document.getElementById('timeLabel').innerHTML = "Leave Now";
+        }
+
         function updateTimeLabel() {
-            const val = document.getElementById('timeSlider').value;
-            document.getElementById('timeLabel').innerHTML = val == 0 ? "Leave Now" : `Leave in ${val} mins`;
+            const val = document.getElementById('departureTime').value;
+            if (!val) {
+                document.getElementById('timeLabel').innerHTML = "Leave Now";
+            } else {
+                const dt = new Date(val);
+                document.getElementById('timeLabel').innerHTML = dt.toLocaleString('en-IN', {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+            }
         }
 
         // --- MULTI-PITSTOP LOGIC ---
@@ -334,10 +347,8 @@
                 overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
             }
             
-            // --- THE SPATIAL BOTTLENECK FIX ---
-            // [timeout:10] forces the server to abort if it takes too long.
-            // out 200; hard-caps the results to prevent Turf.js from freezing your CPU with 8,000+ math calculations.
-            const query = `[out:json][timeout:10];node[amenity=${amenityType}](${overpassBbox});out 200;`;
+            // 🛠️ FIX 1: Change 'node' to 'nwr' and add 'out center'
+            const query = `[out:json][timeout:10];nwr[amenity=${amenityType}](${overpassBbox});out center 200;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
             try {
@@ -350,7 +361,15 @@
                 let validPOIs = [];
 
                 data.elements.forEach(poi => {
-                    if(poi.lat && poi.lon) {
+                    // 🛠️ FIX 2: Safely extract coordinates whether it's a Node or a Polygon (Center)
+                    let pLat = poi.lat || (poi.center && poi.center.lat);
+                    let pLon = poi.lon || (poi.center && poi.center.lon);
+
+                    if(pLat && pLon) {
+                        // Normalize the data so Turf.js and our Popup logic still work
+                        poi.lat = pLat;
+                        poi.lon = pLon;
+
                         let deviation = 0;
                         if (routeExists) {
                             let pt = turf.point([poi.lon, poi.lat]);
@@ -402,7 +421,7 @@
 
                     let marker = L.marker([poi.lat, poi.lon], { icon: customIcon })
                                   .addTo(map)
-                                  .bindPopup(popupHtml); // <-- Use the new popupHtml                    
+                                  .bindPopup(popupHtml);                   
 
                 });
 
@@ -459,9 +478,13 @@
                 let systemHour = 0;
 
                 // --- CALENDAR-AWARE LOGIC ---
-                const now = new Date();
-                const isWeekend = (now.getDay() === 0 || now.getDay() === 6);
-                const currentHour = now.getHours();
+                // --- CALENDAR-AWARE LOGIC ---
+                // Read from the datetime picker, or use the current time if left blank
+                const depInput = document.getElementById('departureTime').value;
+                const targetDate = depInput ? new Date(depInput) : new Date();
+                
+                const isWeekend = (targetDate.getDay() === 0 || targetDate.getDay() === 6);
+                const currentHour = targetDate.getHours();
                 const numRoutes = Math.min(osrmData.routes.length, 2);
 
                 for (let r = 0; r < numRoutes; r++) {
@@ -512,14 +535,14 @@
                         });
                     }
                 
-                    // Call FastAPI Backend with Time Slider value
-                    let offsetValue = parseInt(document.getElementById('timeSlider').value);
+                    // Call FastAPI Backend with Calendar Time
+                    let isoTime = depInput ? targetDate.toISOString() : null;
                     const backendRes = await fetch('/predict_route_segments', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             segments: apiSegments,
-                            future_offset_mins: offsetValue
+                            departure_time: isoTime
                         })
                     });
                     
