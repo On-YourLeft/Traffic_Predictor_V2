@@ -490,7 +490,7 @@
         light_all:
           "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
         satellite:
-          "https://server.arcg nline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       };
       let currentBaseLayer = L.tileLayer(tileProviders.dark_all, {
         attribution: "&copy; OpenStreetMap",
@@ -530,9 +530,9 @@
           map.removeLayer(currentBaseLayer);
         }
 
-        let layerOptions = { attribution: "© OpenStreetMap" };
+        let layerOptions = { attribution: "© Esri, OpenStreetMap" };
 
-        // 🛰️ SATELLITE FIX: Force Leaflet to stretch tiles and stop 404 blank-outs
+        // Stretch zoom level 16 tiles to level 20 to prevent high-zoom 404s
         if (mapStyle === "satellite") {
           layerOptions.maxNativeZoom = 16;
           layerOptions.maxZoom = 20;
