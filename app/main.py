@@ -129,43 +129,83 @@ import requests
 from fastapi import HTTPException
 
 
+import os
+import requests
+from fastapi import HTTPException
+
+# Replace with your actual key or set it as an environment variable
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY", "YOUR_GEOAPIFY_API_KEY")
+
+
 @app.get("/api/pois")
 def fetch_pois_proxy(amenity: str, bbox: str):
-    # Enforce a strict 15-second execution limit and cap results at 50
-    query = f"[out:json][timeout:15];nwr[amenity={amenity}]({bbox});out center 50;"
+    if not GEOAPIFY_API_KEY or GEOAPIFY_API_KEY == "YOUR_GEOAPIFY_API_KEY":
+        raise HTTPException(
+            status_code=500,
+            detail="Geoapify API key is missing. Set GEOAPIFY_API_KEY environment variable.",
+        )
 
-    # Mirror Rotation Pool: Primary, Load Balancer, and Community Fallback
-    overpass_mirrors = [
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-    ]
+    # 1. Map frontend amenity terms to Geoapify place categories
+    category_map = {"fuel": "service.vehicle.fuel", "cafe": "catering.cafe"}
+    category = category_map.get(amenity.lower(), f"catering.{amenity}")
 
-    headers = {
-        "User-Agent": "DelhiTransitEngine/2.0 (traffic-engine-v2.onrender.com)",
-        "Accept": "application/json",
+    # 2. Parse bbox (south,west,north,east) and format into Geoapify's rect:minLon,minLat,maxLon,maxLat
+    try:
+        coords = [float(c.strip()) for c in bbox.split(",")]
+        if len(coords) != 4:
+            raise ValueError("Bounding box must have exactly 4 values.")
+
+        lat1, lon1, lat2, lon2 = coords
+        min_lat, max_lat = min(lat1, lat2), max(lat1, lat2)
+        min_lon, max_lon = min(lon1, lon2), max(lon1, lon2)
+        filter_rect = f"rect:{min_lon},{min_lat},{max_lon},{max_lat}"
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid bbox format: {str(e)}")
+
+    # 3. Query Geoapify Places API v2
+    url = "https://api.geoapify.com/v2/places"
+    params = {
+        "categories": category,
+        "filter": filter_rect,
+        "limit": 50,
+        "apiKey": GEOAPIFY_API_KEY,
     }
 
-    # Iterate through the rotation pool
-    for url in overpass_mirrors:
-        try:
-            # 8-second network timeout per mirror to ensure rapid failover
-            response = requests.post(
-                url, data=query.encode("utf-8"), headers=headers, timeout=8
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            # Catch timeouts and 502/504 errors, print a warning, and proceed to the next URL
-            print(f"⚠️ MIRROR FAILED ({url}): {str(e)}")
-            continue
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
 
-    # If the loop exhausts every server in the pool without returning data
-    print("🚨 ALL OVERPASS MIRRORS EXHAUSTED")
-    raise HTTPException(
-        status_code=504,
-        detail="All Overpass API mirrors are currently unreachable. Please try again.",
-    )
+        # 4. Transform Geoapify GeoJSON features into standard POI elements expected by index.html
+        elements = []
+        for feature in data.get("features", []):
+            props = feature.get("properties", {})
+            geom = feature.get("geometry", {})
+            coordinates = geom.get("coordinates", [None, None])
+
+            lat = props.get("lat") or (coordinates[1] if len(coordinates) > 1 else None)
+            lon = props.get("lon") or (coordinates[0] if len(coordinates) > 0 else None)
+
+            if lat is not None and lon is not None:
+                elements.append(
+                    {
+                        "lat": float(lat),
+                        "lon": float(lon),
+                        "tags": {
+                            "name": props.get("name")
+                            or props.get("formatted", f"Unknown {amenity}"),
+                            "brand": props.get("brand", ""),
+                        },
+                    }
+                )
+
+        return {"elements": elements}
+
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ GEOAPIFY API ERROR: {e}")
+        raise HTTPException(
+            status_code=502, detail="Failed to fetch POIs from Geoapify."
+        )
 
 
 # --- LIVE ENVIRONMENTAL TELEMETRY ---
