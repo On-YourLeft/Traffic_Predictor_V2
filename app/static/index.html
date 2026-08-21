@@ -270,14 +270,36 @@
             modal.style.display = (modal.style.display === 'flex') ? 'none' : 'flex';
         }
 
+        // --- MAP THEME & SATELLITE SETTINGS ---
         function applySettings() {
-            const theme = document.getElementById('theme-select').value;
-            if (theme === 'light') document.body.classList.add('light-theme');
-            else document.body.classList.remove('light-theme');
+            // 1. Safely handle theme change without crashing if element is absent
+            const themeSelect = document.getElementById('theme-select');
+            if (themeSelect) {
+                if (themeSelect.value === 'light') {
+                    document.body.classList.add('light-theme');
+                } else {
+                    document.body.classList.remove('light-theme');
+                }
+            }
 
-            const mapStyle = document.getElementById('map-select').value;
-            map.removeLayer(currentBaseLayer);
-            currentBaseLayer = L.tileLayer(tileProviders[mapStyle], { attribution: '&copy; OpenStreetMap' }).addTo(map);
+            // 2. Safely swap tile provider
+            const mapSelect = document.getElementById('map-select');
+            if (!mapSelect) return;
+
+            const mapStyle = mapSelect.value;
+            if (currentBaseLayer) {
+                map.removeLayer(currentBaseLayer);
+            }
+
+            let layerOptions = { attribution: '© OpenStreetMap' };
+
+            // Prevent blank tiles at high zoom levels
+            if (mapStyle === 'satellite') {
+                layerOptions.maxNativeZoom = 18;
+                layerOptions.maxZoom = 20;
+            }
+
+            currentBaseLayer = L.tileLayer(tileProviders[mapStyle], layerOptions).addTo(map);
         }
 
         // --- LIVE GPS LOGIC ---
@@ -347,6 +369,14 @@
         // --- ADVANCED POI RADAR (TURF.JS) ---
         async function findPOIs(amenityType) {
             const teleBox = document.getElementById('telemetry-box');
+            const btn = document.getElementById('predict-btn');
+            
+            // 🛠️ FIX 1: Prevent clicking while Render's backend is waking up!
+            if (btn.disabled) {
+                teleBox.innerHTML += `<br><span style="color:#f57f17;">⚠️ Wait for the route to finish loading first!</span>`;
+                return;
+            }
+
             let overpassBbox;
             let routeExists = !!globalActiveRouteGeoJSON;
 
@@ -360,14 +390,13 @@
                 overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
             }
             
-            // 🛠️ FIX 1: Removed the '200' limit so it grabs all POIs in the bounding box.
+            // Your exact query using the upgraded 25-second timeout
             const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
             try {
                 const response = await fetch(url);
                 const data = await response.json();
-
                 poiLayers.forEach(marker => map.removeLayer(marker));
                 poiLayers = [];
 
@@ -442,6 +471,8 @@
                 teleBox.innerHTML += `<br><span class="highlight" style="color:#4CAF50;">Found ${validPOIs.length} optimal stops.</span>`;
             } catch (error) {
                 console.error("POI Error:", error);
+                // 🛠️ FIX 2: Stop the infinite buffering visual if the API drops the request
+                teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: Area too large or API busy. Try zooming in!</span>`;
             }
         }
 
