@@ -497,16 +497,24 @@
 
       // --- MAP THEME & SATELLITE SETTINGS ---
       function applySettings() {
-        const theme = document.getElementById("theme-select").value;
-        if (theme === "light") document.body.classList.add("light-theme");
-        else document.body.classList.remove("light-theme");
+        const themeSelect = document.getElementById("theme-select");
+        if (themeSelect) {
+          if (themeSelect.value === "light")
+            document.body.classList.add("light-theme");
+          else document.body.classList.remove("light-theme");
+        }
 
-        const mapStyle = document.getElementById("map-select").value;
-        map.removeLayer(currentBaseLayer);
+        const mapSelect = document.getElementById("map-select");
+        if (!mapSelect) return;
+
+        const mapStyle = mapSelect.value;
+        if (currentBaseLayer) {
+          map.removeLayer(currentBaseLayer);
+        }
 
         let layerOptions = { attribution: "© OpenStreetMap" };
 
-        // 🛠️ THE FIX: Prevents the blank-out by stretching zoom 16 tiles!
+        // 🛰️ SATELLITE FIX: Force Leaflet to stretch tiles and stop 404 blank-outs
         if (mapStyle === "satellite") {
           layerOptions.maxNativeZoom = 16;
           layerOptions.maxZoom = 20;
@@ -606,32 +614,39 @@
           let bbox = turf.bbox(globalActiveRouteGeoJSON);
           overpassBbox = `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`;
 
-          // TIGHT BOUNDING BOX: The user has a route drawn.
-          // We want unlimited data (no cap) to find the absolute best options along the path.
-          queryLimit = "out center;";
+          // Tight route box: Cap at 300 to ensure fast cloud responses
+          queryLimit = "out center 300;";
         } else {
           teleBox.innerHTML += `<br><i>Scanning screen area for ${amenityType}...</i>`;
           const bounds = map.getBounds();
           overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
 
-          // HUGE BOUNDING BOX: No route exists. The map covers half of Delhi.
-          // We MUST cap this at 100, otherwise Overpass drops the connection on deployed environments!
-          queryLimit = "out center 100;";
+          // Massive screen box: Aggressively cap at 150 to bypass the 2-minute "Cafe" hang
+          queryLimit = "out center 150;";
         }
 
-        // The Dynamic Query
-        const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});${queryLimit}`;
-        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        // The Dynamic Query (Ensure you keep your data limits so it doesn't timeout!)
+        const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center 150;`;
+
+        // 🛠️ FIX 1: Use the LZ4 high-capacity load balancer instead of the primary server
+        const url = `https://lz4.overpass-api.de/api/interpreter`;
 
         try {
-          const response = await fetch(url);
+          // 🛠️ FIX 2: Switch from GET to POST to bypass strict Origin firewalls
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: `data=${encodeURIComponent(query)}`,
+          });
+
           if (!response.ok)
-            throw new Error("Overpass API overloaded or rejected the request.");
+            throw new Error("Overpass API firewall rejected the request.");
           const data = await response.json();
 
           poiLayers.forEach((marker) => map.removeLayer(marker));
           poiLayers = [];
-
           let validPOIs = [];
 
           data.elements.forEach((poi) => {
@@ -692,28 +707,27 @@
 
             let safeName = shopName.replace(/'/g, "\\'");
             let popupHtml = `
-                    <div style="font-size:14px; min-width:140px;">
-                        <b>${shopName}</b>${brand}${devText}<br>
-                        <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
-                            style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
-                            ➕ ADD STOP
-                        </button>
-                    </div>
+                        <div style="font-size:14px; min-width:140px;">
+                            <b>${shopName}</b>${brand}${devText}<br>
+                            <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
+                                style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
+                                ➕ ADD STOP
+                            </button>
+                        </div>
                     `;
 
             let marker = L.marker([poi.lat, poi.lon], { icon: customIcon })
               .addTo(map)
               .bindPopup(popupHtml);
 
-            // 🛠️ CRITICAL LEAK FIX: You forgot this line in your snippet!
-            // If you don't push the marker to the array, map.removeLayer() will never clear old markers.
+            // RAM LEAK FIX: Ensure we track the markers to delete them next time
             poiLayers.push(marker);
           });
 
           teleBox.innerHTML += `<br><span class="highlight" style="color:#4CAF50;">Found ${validPOIs.length} optimal stops.</span>`;
         } catch (error) {
           console.error("POI Error:", error);
-          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: Area too large or API busy. Zoom in and try again.</span>`;
+          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: Overpass API is busy. Zoom in slightly and retry.</span>`;
         }
       }
 
