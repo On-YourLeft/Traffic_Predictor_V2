@@ -111,6 +111,9 @@
         text-transform: uppercase;
         font-weight: bold;
       }
+      .location-label {
+        color: var(--highlight-color);
+      }
       input {
         width: 100%;
         padding: 10px;
@@ -375,7 +378,7 @@
 
     <div id="sidebar">
       <div class="header-container">
-        <h2>Intelligent Routing</h2>
+        <h2>TRANSIT ENGINE</h2>
         <button
           class="btn-settings"
           title="Settings"
@@ -386,7 +389,10 @@
       </div>
 
       <div class="form-group">
-        <label style="display: flex; justify-content: space-between">
+        <label
+          class="location-label"
+          style="display: flex; justify-content: space-between"
+        >
           Start Location
           <span
             onclick="useMyLocation()"
@@ -395,15 +401,26 @@
             >📍 Use GPS</span
           >
         </label>
-        <input type="text" id="startLoc" value="Connaught Place, Delhi" />
+        <input
+          type="text"
+          id="startLoc"
+          placeholder="E.g. Connaught Place, Delhi"
+        />
       </div>
       <div class="form-group">
-        <label>Destination</label>
-        <input type="text" id="endLoc" value="Vasant Kunj, Delhi" />
+        <label
+          class="location-label"
+          style="display: flex; justify-content: space-between"
+        >
+          Destination</label
+        >
+        <input type="text" id="endLoc" placeholder="E.g. India Gate, Delhi" />
       </div>
 
       <div class="form-group" style="margin-top: 15px">
         <label
+          class="location-label"
+          style="display: flex; justify-content: space-between"
           >Departure Time:
           <span id="timeLabel" style="color: #007bff">Leave Now</span></label
         >
@@ -485,6 +502,7 @@
 
       let globalEvaluatedRoutes = [];
       let activeWaypoints = [];
+      let pitstopMarkers = [];
 
       // Generate an anonymous session ID for tracking
       const sessionId = "anon_" + Math.random().toString(36).substring(2, 9);
@@ -548,7 +566,7 @@
             },
             () => {
               alert("GPS Access Denied or Unavailable.");
-              startInput.value = "Connaught Place, Delhi";
+              startInput.value = "The Northcap University, Gurugram";
             },
           );
         }
@@ -579,16 +597,52 @@
         }
       }
 
-      // --- MULTI-PITSTOP LOGIC ---
+      // --- MULTI-PITSTOP LOGIC (GHOST MARKER FIX) ---
       function addStop(lat, lon, name) {
-        activeWaypoints.push({ lat: lat, lon: lon, name: name }); // Add to the array
-        map.closePopup();
-        document.getElementById("predict-btn").click(); // Auto-rerun pipeline
+        activeWaypoints.push({ lat: lat, lon: lon, name: name });
+
+        let selectedMarker = null;
+
+        // 1. Loop through radar pins: remove unselected from map, find the chosen one
+        poiLayers.forEach((marker) => {
+          const mPos = marker.getLatLng();
+          // Use a tiny buffer to prevent floating-point mismatch errors
+          const isSelected =
+            Math.abs(mPos.lat - lat) < 0.0001 &&
+            Math.abs(mPos.lng - lon) < 0.0001;
+
+          if (!isSelected) {
+            map.removeLayer(marker);
+          } else {
+            selectedMarker = marker;
+          }
+        });
+
+        // 2. Clear the temporary radar array so the next search is fresh
+        poiLayers = [];
+
+        // 3. Move the chosen marker to the permanent pitstop array!
+        if (selectedMarker) {
+          pitstopMarkers.push(selectedMarker);
+          selectedMarker.openPopup();
+        }
+
+        // 4. Recalculate the route
+        document.getElementById("predict-btn").click();
       }
 
       function removeStop(index) {
-        activeWaypoints.splice(index, 1); // Remove the specific stop at this index
-        document.getElementById("predict-btn").click(); // Auto-rerun pipeline
+        // 1. Remove the waypoint from the routing engine
+        activeWaypoints.splice(index, 1);
+
+        // 2. Remove the exact corresponding marker from the map and our permanent array
+        const removedMarker = pitstopMarkers.splice(index, 1)[0];
+        if (removedMarker) {
+          map.removeLayer(removedMarker);
+        }
+
+        // 3. Recalculate route without the stop
+        document.getElementById("predict-btn").click();
       }
 
       // --- GEOLOCATION LOGIC ---
@@ -638,7 +692,7 @@
           if (!response.ok)
             throw new Error("Backend proxy failed to fetch POIs.");
           const data = await response.json();
-          
+
           poiLayers = [];
           let validPOIs = [];
 
@@ -739,8 +793,8 @@
         try {
           mapLayers.forEach((layer) => map.removeLayer(layer));
           mapLayers = [];
-          poiLayers.forEach((marker) => map.removeLayer(marker));
-          poiLayers = [];
+          //poiLayers.forEach((marker) => map.removeLayer(marker));
+          //poiLayers = [];
 
           const startCoords = await geocode(
             document.getElementById("startLoc").value,
