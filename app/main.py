@@ -125,31 +125,47 @@ import requests
 from fastapi import HTTPException
 
 
+import requests
+from fastapi import HTTPException
+
+
 @app.get("/api/pois")
 def fetch_pois_proxy(amenity: str, bbox: str):
-    # Construct the query purely on the backend. Cap at 50 to guarantee lightning-fast response.
-    query = f"[out:json][timeout:25];nwr[amenity={amenity}]({bbox});out center 50;"
+    # Enforce a strict 15-second execution limit and cap results at 50
+    query = f"[out:json][timeout:15];nwr[amenity={amenity}]({bbox});out center 50;"
 
-    # Switch back to the primary stable server to avoid the lz4 504 Gateway Timeout
-    url = "https://overpass-api.de/api/interpreter"
+    # Mirror Rotation Pool: Primary, Load Balancer, and Community Fallback
+    overpass_mirrors = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
 
     headers = {
         "User-Agent": "DelhiTransitEngine/2.0 (traffic-engine-v2.onrender.com)",
         "Accept": "application/json",
     }
 
-    try:
-        response = requests.post(
-            url, data=query.encode("utf-8"), headers=headers, timeout=30
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ OVERPASS CRASH: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Backend proxy failed to communicate with Overpass API.",
-        )
+    # Iterate through the rotation pool
+    for url in overpass_mirrors:
+        try:
+            # 8-second network timeout per mirror to ensure rapid failover
+            response = requests.post(
+                url, data=query.encode("utf-8"), headers=headers, timeout=8
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            # Catch timeouts and 502/504 errors, print a warning, and proceed to the next URL
+            print(f"⚠️ MIRROR FAILED ({url}): {str(e)}")
+            continue
+
+    # If the loop exhausts every server in the pool without returning data
+    print("🚨 ALL OVERPASS MIRRORS EXHAUSTED")
+    raise HTTPException(
+        status_code=504,
+        detail="All Overpass API mirrors are currently unreachable. Please try again.",
+    )
 
 
 # --- LIVE ENVIRONMENTAL TELEMETRY ---
