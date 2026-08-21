@@ -629,21 +629,16 @@
         const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center 150;`;
 
         // We can safely use the main server again with this method
-        const url = `https://overpass-api.de/api/interpreter`;
+        // Inside your findPOIs function, replace the old Overpass URL and fetch with this:
+        const url = `/api/pois?amenity=${amenityType}&bbox=${overpassBbox}`;
 
         try {
-          // 🛠️ FIX: Raw text POST. No custom headers, no "data=" wrappers.
-          // This completely bypasses the 406 format rejection and CORS preflight.
-          const response = await fetch(url, {
-            method: "POST",
-            body: query,
-          });
-
+          // You are now fetching from your OWN backend, so CORS is fully approved!
+          const response = await fetch(url);
           if (!response.ok)
-            throw new Error(`Overpass API Error: ${response.status}`);
+            throw new Error("Backend proxy failed to fetch POIs.");
           const data = await response.json();
-
-          poiLayers.forEach((marker) => map.removeLayer(marker));
+          
           poiLayers = [];
           let validPOIs = [];
 

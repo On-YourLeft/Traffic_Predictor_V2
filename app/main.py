@@ -113,6 +113,33 @@ def read_root():
     return FileResponse(os.path.join(BASE_DIR, "static/index.html"))
 
 
+import requests
+from fastapi import HTTPException
+
+
+@app.get("/api/pois")
+def fetch_pois_proxy(amenity: str, bbox: str):
+    query = f"[out:json][timeout:25];nwr[amenity={amenity}]({bbox});out center 150;"
+    url = "https://overpass-api.de/api/interpreter"
+
+    try:
+        # 🛠️ FIX: Add a custom User-Agent so the Overpass firewall doesn't think we are a bot!
+        headers = {"User-Agent": "DelhiTransitEngine/1.0 (Student ML Project)"}
+
+        # 🛠️ FIX: Since we are on the backend, we can safely use a standard GET request!
+        response = requests.get(url, params={"data": query}, headers=headers)
+
+        if not response.ok:
+            print(f"⚠️ OVERPASS REJECTED: {response.status_code} - {response.text}")
+
+        response.raise_for_status()
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ BACKEND CRASH: {e}")
+        raise HTTPException(status_code=500, detail=f"Overpass Error: {str(e)}")
+
+
 # --- LIVE ENVIRONMENTAL TELEMETRY ---
 AQI_CACHE = {"penalty": 1.0, "last_fetched": 0, "severity": 3.0}
 
