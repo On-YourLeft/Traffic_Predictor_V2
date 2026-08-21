@@ -117,27 +117,37 @@ import requests
 from fastapi import HTTPException
 
 
+import requests
+from fastapi import HTTPException
+
+
 @app.get("/api/pois")
 def fetch_pois_proxy(amenity: str, bbox: str):
-    query = f"[out:json][timeout:25];nwr[amenity={amenity}]({bbox});out center 150;"
-    url = "https://overpass-api.de/api/interpreter"
+    # 1. Cap the search to 100 items so the Render IP never gets blacklisted for data dumping
+    query = f"[out:json][timeout:60];nwr[amenity={amenity}]({bbox});out center 100;"
+
+    # 2. Use the lz4 high-capacity load balancer built for heavy traffic
+    url = "https://lz4.overpass-api.de/api/interpreter"
+
+    # 3. CRITICAL: Forge a custom User-Agent so Overpass trusts the Render cloud IP
+    headers = {
+        "User-Agent": "DelhiTransitEngine/2.0 (traffic-engine-v2.onrender.com)",
+        "Accept": "application/json",
+    }
 
     try:
-        # 🛠️ FIX: Add a custom User-Agent so the Overpass firewall doesn't think we are a bot!
-        headers = {"User-Agent": "DelhiTransitEngine/1.0 (Student ML Project)"}
-
-        # 🛠️ FIX: Since we are on the backend, we can safely use a standard GET request!
-        response = requests.get(url, params={"data": query}, headers=headers)
-
-        if not response.ok:
-            print(f"⚠️ OVERPASS REJECTED: {response.status_code} - {response.text}")
-
+        # 4. Send as raw encoded bytes to bypass any 406 format rejections
+        response = requests.post(
+            url, data=query.encode("utf-8"), headers=headers, timeout=65
+        )
         response.raise_for_status()
         return response.json()
-
     except requests.exceptions.RequestException as e:
-        print(f"⚠️ BACKEND CRASH: {e}")
-        raise HTTPException(status_code=500, detail=f"Overpass Error: {str(e)}")
+        print(f"⚠️ OVERPASS CRASH: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Backend proxy failed to communicate with Overpass API.",
+        )
 
 
 # --- LIVE ENVIRONMENTAL TELEMETRY ---

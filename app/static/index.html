@@ -660,40 +660,31 @@
         const teleBox = document.getElementById("telemetry-box");
 
         let overpassBbox;
-        let queryLimit;
         let routeExists = !!globalActiveRouteGeoJSON;
 
         if (routeExists) {
           teleBox.innerHTML += `<br><i>Scanning along route for ${amenityType}...</i>`;
           let bbox = turf.bbox(globalActiveRouteGeoJSON);
           overpassBbox = `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`;
-
-          // Tight route box: Cap at 300 to ensure fast cloud responses
-          queryLimit = "out center 300;";
         } else {
           teleBox.innerHTML += `<br><i>Scanning screen area for ${amenityType}...</i>`;
           const bounds = map.getBounds();
           overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-
-          // Massive screen box: Aggressively cap at 150 to bypass the 2-minute "Cafe" hang
-          queryLimit = "out center 150;";
         }
 
-        // The Dynamic Query (Ensure you keep your data limits so it doesn't timeout!)
-        const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center 150;`;
-
-        // We can safely use the main server again with this method
-        // Inside your findPOIs function, replace the old Overpass URL and fetch with this:
+        // Target the FastAPI backend proxy
         const url = `/api/pois?amenity=${amenityType}&bbox=${overpassBbox}`;
 
         try {
-          // You are now fetching from your OWN backend, so CORS is fully approved!
           const response = await fetch(url);
           if (!response.ok)
             throw new Error("Backend proxy failed to fetch POIs.");
           const data = await response.json();
 
+          // Clear old markers completely
+          poiLayers.forEach((marker) => map.removeLayer(marker));
           poiLayers = [];
+
           let validPOIs = [];
 
           data.elements.forEach((poi) => {
@@ -754,27 +745,27 @@
 
             let safeName = shopName.replace(/'/g, "\\'");
             let popupHtml = `
-                        <div style="font-size:14px; min-width:140px;">
-                            <b>${shopName}</b>${brand}${devText}<br>
-                            <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
-                                style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
-                                ➕ ADD STOP
-                            </button>
-                        </div>
-                    `;
+                <div style="font-size:14px; min-width:140px;">
+                    <b>${shopName}</b>${brand}${devText}<br>
+                    <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
+                        style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
+                        ➕ ADD STOP
+                    </button>
+                </div>
+            `;
 
             let marker = L.marker([poi.lat, poi.lon], { icon: customIcon })
               .addTo(map)
               .bindPopup(popupHtml);
 
-            // RAM LEAK FIX: Ensure we track the markers to delete them next time
+            // Track markers so they delete properly on the next scan
             poiLayers.push(marker);
           });
 
           teleBox.innerHTML += `<br><span class="highlight" style="color:#4CAF50;">Found ${validPOIs.length} optimal stops.</span>`;
         } catch (error) {
           console.error("POI Error:", error);
-          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: Overpass API is busy. Zoom in slightly and retry.</span>`;
+          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: The server is busy processing the area. Zoom in and retry.</span>`;
         }
       }
 
