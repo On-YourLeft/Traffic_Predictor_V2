@@ -272,30 +272,18 @@
 
         // --- MAP THEME & SATELLITE SETTINGS ---
         function applySettings() {
-            // 1. Safely handle theme change without crashing if element is absent
-            const themeSelect = document.getElementById('theme-select');
-            if (themeSelect) {
-                if (themeSelect.value === 'light') {
-                    document.body.classList.add('light-theme');
-                } else {
-                    document.body.classList.remove('light-theme');
-                }
-            }
+            const theme = document.getElementById('theme-select').value;
+            if (theme === 'light') document.body.classList.add('light-theme');
+            else document.body.classList.remove('light-theme');
 
-            // 2. Safely swap tile provider
-            const mapSelect = document.getElementById('map-select');
-            if (!mapSelect) return;
-
-            const mapStyle = mapSelect.value;
-            if (currentBaseLayer) {
-                map.removeLayer(currentBaseLayer);
-            }
-
+            const mapStyle = document.getElementById('map-select').value;
+            map.removeLayer(currentBaseLayer);
+            
             let layerOptions = { attribution: '© OpenStreetMap' };
 
-            // Prevent blank tiles at high zoom levels
+            // 🛠️ THE MISSING FIX: Prevents the blank-out by stretching zoom 16 tiles!
             if (mapStyle === 'satellite') {
-                layerOptions.maxNativeZoom = 18;
+                layerOptions.maxNativeZoom = 16;
                 layerOptions.maxZoom = 20;
             }
 
