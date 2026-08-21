@@ -628,21 +628,19 @@
         // The Dynamic Query (Ensure you keep your data limits so it doesn't timeout!)
         const query = `[out:json][timeout:25];nwr[amenity=${amenityType}](${overpassBbox});out center 150;`;
 
-        // 🛠️ FIX 1: Use the LZ4 high-capacity load balancer instead of the primary server
-        const url = `https://lz4.overpass-api.de/api/interpreter`;
+        // We can safely use the main server again with this method
+        const url = `https://overpass-api.de/api/interpreter`;
 
         try {
-          // 🛠️ FIX 2: Switch from GET to POST to bypass strict Origin firewalls
+          // 🛠️ FIX: Raw text POST. No custom headers, no "data=" wrappers.
+          // This completely bypasses the 406 format rejection and CORS preflight.
           const response = await fetch(url, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: `data=${encodeURIComponent(query)}`,
+            body: query,
           });
 
           if (!response.ok)
-            throw new Error("Overpass API firewall rejected the request.");
+            throw new Error(`Overpass API Error: ${response.status}`);
           const data = await response.json();
 
           poiLayers.forEach((marker) => map.removeLayer(marker));
