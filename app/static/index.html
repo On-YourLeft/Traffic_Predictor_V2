@@ -658,7 +658,6 @@
       // --- ADVANCED POI RADAR (TURF.JS) ---
       async function findPOIs(amenityType) {
         const teleBox = document.getElementById("telemetry-box");
-
         let overpassBbox;
         let routeExists = !!globalActiveRouteGeoJSON;
 
@@ -672,7 +671,7 @@
           overpassBbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
         }
 
-        // Target the FastAPI backend proxy
+        // Call your flawless Python proxy
         const url = `/api/pois?amenity=${amenityType}&bbox=${overpassBbox}`;
 
         try {
@@ -681,7 +680,6 @@
             throw new Error("Backend proxy failed to fetch POIs.");
           const data = await response.json();
 
-          // Clear old markers completely
           poiLayers.forEach((marker) => map.removeLayer(marker));
           poiLayers = [];
 
@@ -745,27 +743,27 @@
 
             let safeName = shopName.replace(/'/g, "\\'");
             let popupHtml = `
-                <div style="font-size:14px; min-width:140px;">
-                    <b>${shopName}</b>${brand}${devText}<br>
-                    <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
-                        style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
-                        ➕ ADD STOP
-                    </button>
-                </div>
-            `;
+                        <div style="font-size:14px; min-width:140px;">
+                            <b>${shopName}</b>${brand}${devText}<br>
+                            <button onclick="addStop(${poi.lat}, ${poi.lon}, '${safeName}')" 
+                                style="margin-top:10px; width:100%; background:#28a745; color:white; border:none; padding:6px; border-radius:4px; cursor:pointer; font-weight:bold;">
+                                ➕ ADD STOP
+                            </button>
+                        </div>
+                    `;
 
             let marker = L.marker([poi.lat, poi.lon], { icon: customIcon })
               .addTo(map)
               .bindPopup(popupHtml);
 
-            // Track markers so they delete properly on the next scan
+            // RAM LEAK FIX: Ensures old markers delete properly
             poiLayers.push(marker);
           });
 
           teleBox.innerHTML += `<br><span class="highlight" style="color:#4CAF50;">Found ${validPOIs.length} optimal stops.</span>`;
         } catch (error) {
           console.error("POI Error:", error);
-          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: The server is busy processing the area. Zoom in and retry.</span>`;
+          teleBox.innerHTML += `<br><span style="color:#c62828;">⚠️ Radar Timeout: Overpass API is busy. Zoom in slightly and retry.</span>`;
         }
       }
 

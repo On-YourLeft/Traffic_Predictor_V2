@@ -121,24 +121,26 @@ import requests
 from fastapi import HTTPException
 
 
+import requests
+from fastapi import HTTPException
+
+
 @app.get("/api/pois")
 def fetch_pois_proxy(amenity: str, bbox: str):
-    # 1. Cap the search to 100 items so the Render IP never gets blacklisted for data dumping
-    query = f"[out:json][timeout:60];nwr[amenity={amenity}]({bbox});out center 100;"
+    # Construct the query purely on the backend. Cap at 50 to guarantee lightning-fast response.
+    query = f"[out:json][timeout:25];nwr[amenity={amenity}]({bbox});out center 50;"
 
-    # 2. Use the lz4 high-capacity load balancer built for heavy traffic
-    url = "https://lz4.overpass-api.de/api/interpreter"
+    # Switch back to the primary stable server to avoid the lz4 504 Gateway Timeout
+    url = "https://overpass-api.de/api/interpreter"
 
-    # 3. CRITICAL: Forge a custom User-Agent so Overpass trusts the Render cloud IP
     headers = {
         "User-Agent": "DelhiTransitEngine/2.0 (traffic-engine-v2.onrender.com)",
         "Accept": "application/json",
     }
 
     try:
-        # 4. Send as raw encoded bytes to bypass any 406 format rejections
         response = requests.post(
-            url, data=query.encode("utf-8"), headers=headers, timeout=65
+            url, data=query.encode("utf-8"), headers=headers, timeout=30
         )
         response.raise_for_status()
         return response.json()
